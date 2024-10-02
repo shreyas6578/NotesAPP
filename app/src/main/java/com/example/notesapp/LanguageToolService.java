@@ -13,4 +13,5 @@ public interface LanguageToolService {
             @Field("text") String text,  // The text to be checked
             @Field("language") String language // The language code (e.g., "en" for English)
     );
+
 }

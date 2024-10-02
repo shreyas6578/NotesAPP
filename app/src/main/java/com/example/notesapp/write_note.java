@@ -1,11 +1,15 @@
 package com.example.notesapp;
 
+import android.content.ContentResolver;
+import android.content.ContentValues;
 import android.content.Intent;
 import android.graphics.Paint;
 import android.graphics.pdf.PdfDocument;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.provider.MediaStore;
 import android.text.Editable;
 import android.text.Spannable;
 import android.text.SpannableStringBuilder;
@@ -29,6 +33,7 @@ import androidx.core.view.WindowInsetsCompat;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.text.SimpleDateFormat;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -43,10 +48,10 @@ import retrofit2.Retrofit;
 import retrofit2.converter.gson.GsonConverterFactory;
 
 public class write_note extends AppCompatActivity {
-EditText title,notes;
-Button save,pdf;
-ImageButton check_grammer;
-DataHelper dataHelper;
+    EditText title,notes;
+    Button save,pdf;
+    ImageButton check_grammer;
+    DataHelper dataHelper;
     boolean edit = false;
     int noteId = -1; // Default value for note ID
     @Override
@@ -59,7 +64,7 @@ DataHelper dataHelper;
             v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom);
             return insets;
         });
-onStart();
+        onStart();
         check_grammer = findViewById(R.id.imageButton4);
 
 
@@ -83,13 +88,13 @@ onStart();
 
         dataHelper = DataHelper.getInstance(this);
 
-       title = findViewById(R.id.editTextTitle);
-       notes =findViewById(R.id.editTextNote);
-       save =findViewById(R.id.button);
-       pdf=findViewById(R.id.pdf_button);
+        title = findViewById(R.id.editTextTitle);
+        notes =findViewById(R.id.editTextNote);
+        save =findViewById(R.id.button);
+        pdf=findViewById(R.id.pdf_button);
         Intent intents =getIntent();
         if(intents!=null){
-          //  String id = intents.getStringExtra("id");
+            //  String id = intents.getStringExtra("id");
             String titles = intents.getStringExtra("title");
             String note = intents.getStringExtra("note");
             title.setText(titles);
@@ -144,52 +149,59 @@ onStart();
                 page.getCanvas().drawText(line, xLine, yPosition, paint);
                 yPosition += lineHeight; // Move to the next line
             }
+
             // Finish the page
             pdfDocument.finishPage(page);
-            // Save the file in the Documents folder
-            File pdfDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS);
-            if (!pdfDir.exists()) {
-                pdfDir.mkdirs();
-            }
-            String fileName = noteTitle + ".pdf";
-            File filePath = new File(pdfDir, fileName);
 
-            try {
-                FileOutputStream fos = new FileOutputStream(filePath);
-                pdfDocument.writeTo(fos);
-                fos.close();
-                Toast.makeText(this, "PDF saved in Documents: " + filePath.getAbsolutePath(), Toast.LENGTH_LONG).show();
-            } catch (IOException e) {
-                e.printStackTrace();
+            // Save the file using MediaStore
+            ContentResolver resolver = getContentResolver();
+            ContentValues contentValues = new ContentValues();
+            String fileName = noteTitle + "_" + System.currentTimeMillis() + ".pdf"; // Ensure unique file name
+            contentValues.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName);
+            contentValues.put(MediaStore.MediaColumns.MIME_TYPE, "application/pdf");
+            contentValues.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOCUMENTS);
+
+            Uri uri = resolver.insert(MediaStore.Files.getContentUri("external"), contentValues);
+
+            if (uri != null) {
+                try (OutputStream outputStream = resolver.openOutputStream(uri)) {
+                    pdfDocument.writeTo(outputStream);
+                    Toast.makeText(this, "PDF saved in Documents", Toast.LENGTH_LONG).show();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                    Toast.makeText(this, "Error creating PDF: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                } finally {
+                    pdfDocument.close();
+                }
+            } else {
                 Toast.makeText(this, "Error creating PDF", Toast.LENGTH_SHORT).show();
             }
-
-            // Close the document
-            pdfDocument.close();
         });
-       save.setOnClickListener(click->{
-    new Thread(() -> {
-        String noteTitle = title.getText().toString();
-        String noteText = notes.getText().toString();
-        String currentTime = getCurrentTime();
-if(edit && noteId != -1){
-    dataHelper.noteDao().updateNote(noteId,noteTitle,noteText,currentTime);
-}
-else {
-    // Create a new Note object
-    database note = new database(noteTitle, noteText, currentTime);
 
-    // Insert the note into the database
-    dataHelper.noteDao().insert(note);
-    runOnUiThread(() ->
-            Toast.makeText(this, "Note saved successfully!", Toast.LENGTH_SHORT).show()
-    );
-}
-    }).start();
-  Intent   intent = new Intent(this,MainActivity.class);
-    startActivity(intent);
 
-});
+        save.setOnClickListener(click->{
+            new Thread(() -> {
+                String noteTitle = title.getText().toString();
+                String noteText = notes.getText().toString();
+                String currentTime = getCurrentTime();
+                if(edit && noteId != -1){
+                    dataHelper.noteDao().updateNote(noteId,noteTitle,noteText,currentTime);
+                }
+                else {
+                    // Create a new Note object
+                    database note = new database(noteTitle, noteText, currentTime);
+
+                    // Insert the note into the database
+                    dataHelper.noteDao().insert(note);
+                    runOnUiThread(() ->
+                            Toast.makeText(this, "Note saved successfully!", Toast.LENGTH_SHORT).show()
+                    );
+                }
+            }).start();
+            Intent   intent = new Intent(this,MainActivity.class);
+            startActivity(intent);
+
+        });
     }
     public static String getCurrentTime() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -207,29 +219,24 @@ else {
 
         // Highlight grammar mistakes in red
         for (GrammarResponse.Match match : grammarResponse.matches) {
-            // Highlight the mistake
             spannable.setSpan(new ForegroundColorSpan(getResources().getColor(android.R.color.holo_red_dark)),
                     match.offset, match.offset + match.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
 
             // Show a clickable span to provide suggestions
-            int start = match.offset;
-            int end = match.offset + match.length;
             spannable.setSpan(new ClickableSpan() {
                 @Override
                 public void onClick(View widget) {
-                    // Show suggestions for correction in a dialog
                     showSuggestionsDialog(match.replacements);
                 }
-            }, start, end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }, match.offset, match.offset + match.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
 
-        // Set the modified text with clickable spans in the EditText
         notes.setText(spannable);
-        notes.setMovementMethod(LinkMovementMethod.getInstance()); // Make the spans clickable
+        notes.setMovementMethod(LinkMovementMethod.getInstance());
     }
+
     private void showSuggestionsDialog(List<GrammarResponse.Match.Replacement> replacements) {
         String[] suggestions = new String[replacements.size()];
-
         for (int i = 0; i < replacements.size(); i++) {
             suggestions[i] = replacements.get(i).value;
         }
@@ -237,7 +244,6 @@ else {
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle("Suggestions")
                 .setItems(suggestions, (dialog, which) -> {
-                    // Apply the selected suggestion to the text
                     applySuggestion(replacements.get(which).value);
                 })
                 .setNegativeButton("Cancel", null)
@@ -245,11 +251,9 @@ else {
     }
 
     private void applySuggestion(String suggestion) {
-        // Get the currently selected text and replace it with the suggestion
         Editable editable = notes.getText();
         int start = notes.getSelectionStart();
         int end = notes.getSelectionEnd();
-
         if (start >= 0 && end >= 0) {
             editable.replace(start, end, suggestion);
         }
@@ -257,7 +261,6 @@ else {
 
     private void checkGrammar(LanguageToolService service, String text) {
         Call<GrammarResponse> call = service.checkGrammar(text, "en");
-
         call.enqueue(new Callback<GrammarResponse>() {
             @Override
             public void onResponse(@NonNull Call<GrammarResponse> call, @NonNull Response<GrammarResponse> response) {
@@ -275,5 +278,4 @@ else {
             }
         });
     }
-
 }
